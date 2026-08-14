@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { staticAssetUrl } from "@/lib/assets";
 import { clearAuthorSessionKey, loadAuthorSessionKey, saveAuthorSessionKey } from "@/lib/author-session-key-store";
+import { downloadChapterMarkdown, openChapterPdfExport } from "@/lib/chapter-export";
 import { clearAuthorToken, ContentApiError, fetchPublishedContent, isCloudSyncEnabled, publishContent, startAuthorSession } from "@/lib/cloud-content";
 import { escapeHtml, renderMarkdown, tableToMarkdown } from "@/lib/markdown";
 import {
@@ -613,6 +614,13 @@ export default function Home() {
                   {isAuthor && <div className="print-hidden reader-actions" data-html2canvas-ignore="true"><button type="button" onClick={() => openEdit(selectedItem)} aria-label="编辑当前章节"><Pencil size={16} /></button><button type="button" onClick={() => setPendingDelete(selectedItem)} aria-label="删除当前章节"><Trash2 size={16} /></button></div>}
                 </header>
                 <div className="reader-rule" />
+                <div className="chapter-export-bar print-hidden" aria-label="当前章节导出">
+                  <div><span>READER EXPORT</span><p>将当前章节带走，适合离线学习与笔记整理。</p></div>
+                  <div className="chapter-export-actions">
+                    <button type="button" onClick={() => { void openChapterPdfExport(selectedItem).then(() => toast.success("已打开当前章节打印窗口，请选择“另存为 PDF”。")).catch((error) => toast.error(error instanceof Error ? error.message : "当前章节 PDF 导出准备失败，请重试。")); }} title="打开打印窗口，可另存为 PDF"><Download size={15} /> 导出本节 PDF</button>
+                    <button type="button" onClick={() => { downloadChapterMarkdown(selectedItem); toast.success("当前章节的 Markdown 文件已开始下载。"); }} title="下载当前章节的原始 Markdown"><Download size={15} /> 下载 Markdown</button>
+                  </div>
+                </div>
                 <div className="markdown-body" onClick={handleTutorialCopy} dangerouslySetInnerHTML={{ __html: selectedMarkdownHtml }} />
               </article>
 
