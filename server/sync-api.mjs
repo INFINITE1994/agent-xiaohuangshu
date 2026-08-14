@@ -30,6 +30,8 @@ const toBase64Url = (value) => Buffer.from(value).toString("base64url");
 const sign = (value) => crypto.createHmac("sha256", process.env.AUTHOR_SESSION_SECRET).update(value).digest("base64url");
 const sessionDurationMs = 12 * 60 * 60 * 1000;
 const timingSafeEqual = (left, right) => left.length === right.length && crypto.timingSafeEqual(Buffer.from(left), Buffer.from(right));
+const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const maximumImageBytes = 2.5 * 1024 * 1024;
 
 function isAllowedOrigin(origin) {
   return !origin || allowedOrigins.has(normalizeOrigin(origin));
@@ -81,6 +83,16 @@ async function ensureSchema() {
       published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS agent_content_images (
+      image_id CHAR(36) NOT NULL PRIMARY KEY,
+      file_name VARCHAR(180) NOT NULL,
+      mime_type VARCHAR(32) NOT NULL,
+      image_data MEDIUMBLOB NOT NULL,
+      byte_size INT UNSIGNED NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+  `);
 }
 
 async function readPublication() {
@@ -125,6 +137,57 @@ app.post("/v1/author/session", (request, response) => {
   const accessCode = typeof request.body?.accessCode === "string" ? request.body.accessCode.trim() : "";
   if (!accessCode || !verifyAuthorCode(accessCode)) return response.status(401).json({ error: "作者访问码不正确。" });
   return response.json({ token: issueToken(), expiresIn: sessionDurationMs / 1000 });
+});
+
+app.get("/v1/images/:imageId", async (request, response, next) => {
+  try {
+    const imageId = typeof request.params.imageId === "string" ? request.params.imageId : "";
+    if (!/^[0-9a-f-]{36}$/i.test(imageId)) return response.status(404).end();
+    const [rows] = await pool.execute("SELECT mime_type AS mimeType, image_data AS imageData FROM agent_content_images WHERE image_id = ?", [imageId]);
+    const image = rows[0];
+    if (!image) return response.status(404).end();
+    response.setHeader("Content-Type", image.mimeType);
+    response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    return response.send(image.imageData);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/v1/images", async (request, response, next) => {
+  if (!verifyToken(request.headers.authorization)) return response.status(401).json({ error: "作者会话已失效，请重新解锁。" });
+  const { fileName, mimeType, dataBase64 } = request.body ?? {};
+  if (typeof fileName !== "string" || typeof mimeType !== "string" || typeof dataBase64 !== "string") {
+    return response.status(400).json({ error: "图片上传参数不完整。" });
+  }
+  if (!acceptedImageTypes.has(mimeType) || fileName.trim().length === 0 || fileName.length > 180 || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64)) {
+    return response.status(400).json({ error: "仅支持 JPG、PNG 或 WebP 图片。" });
+  }
+
+  const imageData = Buffer.from(dataBase64, "base64");
+  if (!imageData.length || imageData.length > maximumImageBytes) {
+    return response.status(400).json({ error: "图片大小需在 2.5 MB 以内。" });
+  }
+
+  try {
+    const imageId = crypto.randomUUID();
+    const safeFileName = fileName.trim().replace(/[\\/:*?"<>|]/g, "-");
+    await pool.execute(
+      "INSERT INTO agent_content_images (image_id, file_name, mime_type, image_data, byte_size) VALUES (?, ?, ?, ?, ?)",
+      [imageId, safeFileName, mimeType, imageData, imageData.length],
+    );
+    const forwardedProtocol = request.headers["x-forwarded-proto"]?.toString().split(",")[0]?.trim();
+    const publicProtocol = forwardedProtocol || request.protocol;
+    return response.status(201).json({
+      id: imageId,
+      url: `${publicProtocol}://${request.get("host")}/v1/images/${imageId}`,
+      fileName: safeFileName,
+      mimeType,
+      byteSize: imageData.length,
+    });
+  } catch (error) {
+    return next(error);
+  }
 });
 
 app.put("/v1/content", async (request, response, next) => {

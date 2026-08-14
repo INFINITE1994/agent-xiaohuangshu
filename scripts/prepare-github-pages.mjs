@@ -43,9 +43,19 @@ const enrichedIndexHtml = indexHtml
 
 const robots = `User-agent: *\nAllow: /\nSitemap: ${siteUrl}sitemap.xml\n`;
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>${escapeXml(siteUrl)}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>1.0</priority>\n  </url>\n</urlset>\n`;
+const staticRouteFallback = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="robots" content="noindex" /><title>正在打开 Agent小黄书</title></head><body><script>
+  (function () {
+    var siteBase = ${JSON.stringify(new URL(siteUrl).pathname)};
+    var path = window.location.pathname;
+    var route = path.indexOf(siteBase) === 0 ? path.slice(siteBase.length) : path.replace(/^\\//, "");
+    var suffix = route + window.location.search + window.location.hash;
+    window.location.replace(${JSON.stringify(siteUrl)} + "?route=" + encodeURIComponent(suffix));
+  }());
+</script></body></html>`;
 
 await Promise.all([
   writeFile(path.join(outputDirectory, "index.html"), enrichedIndexHtml),
+  writeFile(path.join(outputDirectory, "404.html"), staticRouteFallback),
   writeFile(path.join(outputDirectory, "robots.txt"), robots),
   writeFile(path.join(outputDirectory, "sitemap.xml"), sitemap),
 ]);

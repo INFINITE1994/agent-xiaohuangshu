@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS agent_content_images (
+  image_id CHAR(36) NOT NULL PRIMARY KEY,
+  file_name VARCHAR(180) NOT NULL,
+  mime_type VARCHAR(32) NOT NULL,
+  image_data MEDIUMBLOB NOT NULL,
+  byte_size INT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

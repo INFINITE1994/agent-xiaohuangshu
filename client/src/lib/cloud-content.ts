@@ -8,6 +8,16 @@ export type PublishedContent = {
   publishedAt: string | null;
 };
 
+export type UploadedContentImage = {
+  id: string;
+  url: string;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+};
+
+export const MAXIMUM_CONTENT_IMAGE_BYTES = 2.5 * 1024 * 1024;
+
 export class ContentApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -39,6 +49,35 @@ export const startAuthorSession = async (accessCode: string) => {
     body: JSON.stringify({ accessCode }),
   });
   window.sessionStorage.setItem(AUTHOR_TOKEN_KEY, payload.token);
+};
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("无法读取图片文件。"));
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      const base64 = dataUrl.includes(",") ? dataUrl.slice(dataUrl.indexOf(",") + 1) : "";
+      if (!base64) reject(new Error("图片内容无效。"));
+      else resolve(base64);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export const uploadContentImage = async (file: File) => {
+  if (!isCloudSyncEnabled()) throw new ContentApiError("当前未启用云端同步，无法共享图片。", 400);
+  if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type)) {
+    throw new ContentApiError("仅支持 JPG、PNG 或 WebP 图片。", 400);
+  }
+  if (!file.size || file.size > MAXIMUM_CONTENT_IMAGE_BYTES) {
+    throw new ContentApiError("图片大小需在 2.5 MB 以内。", 400);
+  }
+  return request<UploadedContentImage>("/v1/images", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${readAuthorToken()}` },
+    body: JSON.stringify({ fileName: file.name, mimeType: file.type, dataBase64: await readFileAsBase64(file) }),
+  });
 };
 
 export const publishContent = (content: ContentItem[], expectedVersion: number) => request<PublishedContent>("/v1/content", {

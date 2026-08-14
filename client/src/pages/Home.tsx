@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
 /* 橙皮工作台页面：保留米白纸张、深墨层级与橙皮朱索引色；云端发布状态只作为低干扰的内容元信息呈现。 */
+import { useLocation } from "wouter";
 import {
   ArrowLeft,
   ArrowRight,
@@ -42,6 +43,7 @@ import {
 import { copyInitialContent, displayNumber, excerpt, initialContent, makeDraft, mergePrivateOverrides, partOrder, type ContentItem, type Draft } from "@/lib/tutorial-content";
 
 export default function Home() {
+  const [, setLocation] = useLocation();
   const cloudSyncEnabled = isCloudSyncEnabled();
   const [content, setContent] = useState<ContentItem[]>(copyInitialContent);
   const [selectedId, setSelectedId] = useState(() => {
@@ -246,6 +248,15 @@ export default function Home() {
     persistSelectedId(id);
     setMenuOpen(false);
     window.setTimeout(() => document.getElementById("reading-canvas")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
+
+  const openAuthorWorkbench = (itemId?: string) => {
+    if (!isAuthor) {
+      setAuthorDialogOpen(true);
+      return;
+    }
+    if (itemId) persistSelectedId(itemId);
+    setLocation("/author");
   };
 
   const openCreate = () => {
@@ -566,7 +577,7 @@ export default function Home() {
               </a>
               <div className="hidden items-center gap-2 text-xs font-medium tracking-[0.12em] text-[#20201d]/52 md:flex"><span className="h-2 w-2 rounded-full bg-[#e94e1b]" /> 持续更新 V0.1</div>
               <div className="ml-auto flex items-center gap-2">
-                {isAuthor ? <><button type="button" className="top-action hidden md:inline-flex" onClick={() => openEdit(selectedItem)}><FilePenLine size={16} /> 编辑排版</button><button type="button" className="top-action hidden sm:inline-flex" onClick={() => setManagerOpen(true)}><LayoutList size={16} /> 管理内容</button><button type="button" className="author-status hidden lg:inline-flex" onClick={exitAuthorMode}><LogOut size={14} /> 退出作者模式</button></> : <button type="button" className="top-action hidden sm:inline-flex" onClick={() => setAuthorDialogOpen(true)}><LockKeyhole size={16} /> 作者解锁</button>}
+                {isAuthor ? <><button type="button" className="top-action hidden md:inline-flex" onClick={() => openAuthorWorkbench(selectedItem.id)}><FilePenLine size={16} /> 编辑排版</button><button type="button" className="top-action hidden sm:inline-flex" onClick={() => openAuthorWorkbench()}><LayoutList size={16} /> 作者工作台</button><button type="button" className="author-status hidden lg:inline-flex" onClick={exitAuthorMode}><LogOut size={14} /> 退出作者模式</button></> : <button type="button" className="top-action hidden sm:inline-flex" onClick={() => setAuthorDialogOpen(true)}><LockKeyhole size={16} /> 作者解锁</button>}
                 <button type="button" className="top-action top-action-primary" onClick={exportPdf} disabled={exporting}><Download size={16} /> <span className="hidden sm:inline">{exporting ? "正在导出" : "导出整本 PDF"}</span></button>
                 <button type="button" className="mobile-menu sm:hidden" onClick={() => setMenuOpen(true)} aria-label="打开目录"><Menu size={20} /></button>
               </div>
@@ -578,7 +589,7 @@ export default function Home() {
               <div className="absolute right-0 top-0 flex h-full w-[min(90vw,390px)] flex-col bg-[#f4f0e7] p-6 shadow-2xl">
                 <div className="flex items-center justify-between border-b border-[#20201d]/10 pb-5"><span className="brand-name text-xl">完整目录</span><button type="button" className="icon-button" onClick={() => setMenuOpen(false)} aria-label="关闭目录"><X size={20} /></button></div>
                 <div className="mt-6 min-h-0 flex-1 overflow-y-auto">{renderSectionLinks(true)}</div>
-                <button type="button" onClick={() => { isAuthor ? setManagerOpen(true) : setAuthorDialogOpen(true); setMenuOpen(false); }} className="top-action mt-5 w-full justify-center">{isAuthor ? <><FilePenLine size={16} /> 管理内容</> : <><LockKeyhole size={16} /> 作者解锁</>}</button>
+                <button type="button" onClick={() => { if (isAuthor) openAuthorWorkbench(); else setAuthorDialogOpen(true); setMenuOpen(false); }} className="top-action mt-5 w-full justify-center">{isAuthor ? <><FilePenLine size={16} /> 作者工作台</> : <><LockKeyhole size={16} /> 作者解锁</>}</button>
               </div>
             </div>
           )}
@@ -590,7 +601,7 @@ export default function Home() {
               <div className="relative z-10 flex min-h-[340px] max-w-[705px] flex-col justify-between p-7 sm:p-10 lg:min-h-[400px] lg:p-12">
                 <div className="eyebrow-row"><span>INFINITE</span></div>
                 <div><p className="hero-overline">AGENT小黄书 · LEARN AI FROM SCRATCH</p><h1 id="hero-title" className="hero-title">Agent<em>小黄书</em></h1><p className="hero-copy">抖音：001_INFINITE<span className="ml-8">X：@INFINITE_LIU</span></p></div>
-                <div className="flex flex-wrap gap-3"><button type="button" onClick={() => selectItem(content[0]?.id ?? "")} className="ink-button">从导读开始 <ArrowRight size={17} /></button>{isAuthor ? <button type="button" onClick={openCreate} className="ghost-ink-button"><Plus size={17} /> 新建并排版</button> : <button type="button" onClick={() => setAuthorDialogOpen(true)} className="ghost-ink-button"><LockKeyhole size={17} /> 作者解锁后管理</button>}</div>
+                <div className="flex flex-wrap gap-3"><button type="button" onClick={() => selectItem(content[0]?.id ?? "")} className="ink-button">从导读开始 <ArrowRight size={17} /></button>{isAuthor ? <button type="button" onClick={() => openAuthorWorkbench()} className="ghost-ink-button"><Plus size={17} /> 进入作者工作台</button> : <button type="button" onClick={() => setAuthorDialogOpen(true)} className="ghost-ink-button"><LockKeyhole size={17} /> 作者解锁后管理</button>}</div>
               </div>
             </section>
 
@@ -600,7 +611,7 @@ export default function Home() {
               </div>
               <div className="print-hidden flex flex-col gap-3 border-b border-[#20201d]/10 py-5 sm:flex-row sm:items-center sm:justify-between">
                 <label className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索教程正文、章节标题" aria-label="搜索教程内容" />{query && <button type="button" onClick={() => setQuery("")} aria-label="清空搜索"><X size={15} /></button>}</label>
-                <div className="flex items-center gap-2"><span className="hidden text-xs tracking-[0.12em] text-[#20201d]/50 sm:block">{visibleItems.length} 个结果</span>{isAuthor && <button type="button" onClick={openCreate} className="add-content-button"><FilePlus2 size={16} /> 新增内容</button>}</div>
+                <div className="flex items-center gap-2"><span className="hidden text-xs tracking-[0.12em] text-[#20201d]/50 sm:block">{visibleItems.length} 个结果</span>{isAuthor && <button type="button" onClick={() => openAuthorWorkbench()} className="add-content-button"><FilePlus2 size={16} /> 作者工作台</button>}</div>
               </div>
 
               {query && (
@@ -611,7 +622,7 @@ export default function Home() {
                 <header className="reader-header">
                   <div className="reader-index"><span>{displayNumber(selectedItem)}</span><i /><span>{selectedItem.kind === "chapter" ? "CHAPTER" : selectedItem.kind.toUpperCase()}</span></div>
                   <div className="reader-title-wrap"><p className="eyebrow">{selectedItem.part}</p><h2>{selectedItem.title}</h2><div className="reader-meta"><span>{selectedItem.modifiedAt}</span>{selectedItem.isCustom && <span className="personal-chip">个人内容</span>}</div></div>
-                  {isAuthor && <div className="print-hidden reader-actions" data-html2canvas-ignore="true"><button type="button" onClick={() => openEdit(selectedItem)} aria-label="编辑当前章节"><Pencil size={16} /></button><button type="button" onClick={() => setPendingDelete(selectedItem)} aria-label="删除当前章节"><Trash2 size={16} /></button></div>}
+                  {isAuthor && <div className="print-hidden reader-actions" data-html2canvas-ignore="true"><button type="button" onClick={() => openAuthorWorkbench(selectedItem.id)} aria-label="在作者工作台编辑当前章节"><Pencil size={16} /></button><button type="button" onClick={() => openAuthorWorkbench(selectedItem.id)} aria-label="在作者工作台管理当前章节"><LayoutList size={16} /></button></div>}
                 </header>
                 <div className="reader-rule" />
                 <div className="chapter-export-bar print-hidden" aria-label="当前章节导出">

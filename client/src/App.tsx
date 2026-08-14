@@ -1,8 +1,10 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Router as WouterRouter, Switch } from "wouter";
+import { useEffect } from "react";
+import { Route, Router as WouterRouter, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import AuthorWorkbench from "./pages/AuthorWorkbench";
 import Home from "./pages/Home";
 
 /**
@@ -22,12 +24,31 @@ function getStaticRouterBase() {
   return assetsIndex > 0 ? pathname.slice(0, assetsIndex) : "";
 }
 
+/**
+ * GitHub Pages 的静态 404 页面会将深链接编码为 ?route=... 回到站点根目录。
+ * 此组件在 Wouter 基路径内部恢复路由，因此 /<仓库名>/author 的直接访问与刷新均可进入受保护页面。
+ */
+function StaticRouteRecovery() {
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    const pendingRoute = new URLSearchParams(window.location.search).get("route");
+    if (!pendingRoute) return;
+    const target = pendingRoute.startsWith("/") ? pendingRoute : `/${pendingRoute}`;
+    setLocation(target, { replace: true });
+  }, [setLocation]);
+
+  return null;
+}
+
 function ApplicationRoutes() {
   const base = getStaticRouterBase();
   return (
     <WouterRouter base={base}>
+      <StaticRouteRecovery />
       <Switch>
         <Route path={"/"} component={Home} />
+        <Route path={"/author"} component={AuthorWorkbench} />
         <Route path={"/404"} component={NotFound} />
         {/* Final fallback route */}
         <Route component={NotFound} />
