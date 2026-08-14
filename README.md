@@ -1,84 +1,114 @@
 # Agent小黄书
 
-面向零基础学习者的 AI 智能体实践指南与内容管理网站。公开阅读站托管在 GitHub Pages；作者可在受保护的工作台中管理章节、发布云端内容并维护教程图片。
+> 面向零基础学习者的 AI 智能体实践指南，以及一套可持续维护、公开发布的中文教程网站。
 
-## GitHub Pages 部署
+[在线阅读](https://infinite1994.github.io/agent-xiaohuangshu/) · [作者工作台](https://infinite1994.github.io/agent-xiaohuangshu/author) · [云端同步部署说明](./RENDER_SYNC_DEPLOY.md)
 
-1. 在 GitHub 创建一个空仓库，并将本项目代码推送至 `main` 分支。
-2. 在仓库根目录运行以下命令生成适配项目子路径的静态资源：
+## 教程定位
 
-   ```bash
-   pnpm install
-   SITE_URL=https://YOUR_GITHUB_USERNAME.github.io/YOUR_REPOSITORY/ pnpm run build:pages
-   ```
+**Agent小黄书**不是单一工具的操作手册，而是一条从理解 AI 智能体、完成环境配置、掌握开发工作流，到形成可交付能力与变现路径的学习路线。教程保持中文语境、可执行步骤和持续修订的出版物形式，适合第一次接触 AI Agent 的学习者，也适合希望整理实践方法的开发者与内容创作者。
 
-3. 在 GitHub 仓库依次打开 **Settings → Pages**，在 **Build and deployment** 中选择 **GitHub Actions**。
-4. 提交下方工作流文件至 `.github/workflows/deploy-pages.yml`。之后每次推送到 `main` 都会自动构建并发布。
+全书目前包含 **33 个内容单元**与 **8 个篇章及附录**。读者可以在线阅读、复制代码与表格、导出当前章节或整本教程；作者可以在独立工作台中维护内容并发布给所有访客。
 
-> 如果使用 GitHub 的传统「从分支部署」方式，请以 `SITE_URL` 指向最终公开地址后运行 `pnpm run build:pages`，再将生成的 `dist/public` 目录发布为 Pages 站点目录。
+## 内容地图
 
-> GitHub Actions 会自动根据仓库名称生成正确的默认 Pages 地址，同时写入生产产物的 `sitemap.xml`、`robots.txt`、canonical URL 与 Open Graph 图片地址。该相对构建方式支持 `<用户名>.github.io` 根路径站点及 `/<仓库名>/` 项目子路径站点；应用会在生产环境从入口资源地址识别项目子路径，无需将仓库名称写入源码。
-
-> 如需让作者网页编辑同步给所有访客，请按 [Render + SQLPub 内容同步部署](./RENDER_SYNC_DEPLOY.md) 创建 API，并在 GitHub Actions Variables 中设置 `CONTENT_API_URL`。未设置该变量时，网站会继续使用仓库内置教程与原有本地作者模式，不会把数据库凭据暴露到前端。
-
-## 图片资源检查
-
-书封图与品牌图已纳入 `client/public/offline-assets/`。提交仓库前请确认该目录至少包含 `agent-book-hero.webp` 与 `agent-book-mark.webp`；构建后它们会自动复制到 `dist/public/offline-assets/`，不依赖 Manus 专属资源路径。
-
-## 数据保存说明
-
-| 能力 | 实现方式 | 说明 |
+| 模块 | 学习重点 | 覆盖内容 |
 | --- | --- | --- |
-| 新增、编辑、删除内容 | AES-GCM 加密浏览器本地快照 | 数据仅保存在编辑所用的浏览器与设备中；刷新和退出管理模式后仍会保留。 |
-| 导出 PDF | 浏览器端生成 | 点击「导出 PDF」即可下载当前显示内容。 |
-| 跨设备同步 | 不包含 | 如需要多人协作或跨设备同步，需要接入带认证的后端与数据库。 |
+| 前言与准备 | 建立学习路径与最短上手路线 | 教程使用方式、30 分钟安装第一个智能体 |
+| 第一篇：认识智能体 | 理解概念与工具格局 | 智能体原理、AI 编程工具演进、2026 格局速览 |
+| 第二篇：安装与配置 | 完成基础环境 | API Key、Claude Code、Codex、Hermes、Ollama |
+| 第三篇：Skill 完全指南 | 建立可复用能力单元 | Skill 标准、生态、筛选、编写与完整文件组织 |
+| 第四篇：开发流程与标准工作流 | 把任务转化为可交付成果 | 需求、开发、联调、测试、上线、复盘与提示词模板 |
+| 第五篇：变现指南 | 把能力转化为实践路径 | 变现逻辑、路径选择、起步路线与避坑 |
+| 第六篇：安全与合规 | 建立必要边界 | 权限控制、安全铁律、法律红线与合规速查 |
+| 附录与资源 | 随时查阅与落地 | 命令、工具资源、报错、费用模型与术语表 |
 
-> 作者访问码与加密快照用于静态站点中的本地访问控制和本地防窥保护，不构成服务端权限系统。请勿将需要服务器级保密的数据发布进纯静态网站。
+教程原稿位于 [`source/agent-xiaohuangshu.md`](./source/agent-xiaohuangshu.md)。站点内置内容数据位于 `client/src/data/tutorial.ts`；日常修订建议通过线上作者工作台完成。
 
-## GitHub Actions 工作流
+## 项目能力
 
-```yaml
-name: Deploy static site to GitHub Pages
+该项目将教程作为一个可以长期修订的公开知识库，而非一次性静态页面。阅读端以清晰的目录、章节阅读、代码和表格复制、章节/整本导出为主；作者端使用受保护的 `/author` 工作台完成章节检索、富文本 Markdown 编辑、实时预览、图片素材维护与发布。
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+| 领域 | 实现方式 |
+| --- | --- |
+| 内容阅读 | Markdown 渲染、目录导航、章节阅读、代码/引用/表格复制与 PDF/Markdown 导出 |
+| 作者维护 | 独立工作台、章节新增/编辑/删除、排版工具栏、实时预览、图片库与发布流程 |
+| 内容安全 | 本地模式采用 AES-GCM 加密快照与 IndexedDB 会话密钥；云端模式采用短期作者会话令牌 |
+| 跨设备发布 | 作者通过 Render API 发布完整内容快照，访客从 SQLPub MySQL 读取已发布版本 |
+| 搜索发现 | 页面元数据、JSON-LD、robots.txt、XML sitemap 与 GitHub Pages 规范 URL 生成 |
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+## 技术架构
 
-concurrency:
-  group: pages
-  cancel-in-progress: false
+前端使用 **React 19、TypeScript、Vite 7、Tailwind CSS 4 与 shadcn/ui**。教程正文由 `marked` 渲染，并在展示前使用 DOMPurify 清理；路由使用 Wouter，并支持 GitHub Pages 的项目子路径。
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        # 自动读取 package.json 中的 packageManager：pnpm@10.4.1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build:pages
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist/public
+生产环境采用“静态阅读站 + 受控同步 API”的分层架构：GitHub Pages 负责公开访问与静态资源，Render 托管 Node/Express 同步服务，SQLPub MySQL 保存已发布教程与图片二进制数据。数据库凭据仅保存在 Render 环境变量中，不会进入 Git 仓库或浏览器端代码。
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+```text
+公开读者
+    │
+    ▼
+GitHub Pages（React 阅读站）
+    │  读取已发布教程与图片
+    ▼
+Render Node / Express API
+    │
+    ▼
+SQLPub MySQL（内容快照、图片）
+
+作者
+    │
+    ▼
+/author 独立工作台 ── 发布 ──► Render API
 ```
+
+## 项目结构
+
+```text
+client/
+  src/pages/              阅读页与作者工作台
+  src/data/tutorial.ts    站点内置教程数据
+  src/lib/                Markdown、导出、加密、云端同步与图片处理模块
+  public/offline-assets/  书封与品牌静态资源
+server/
+  sync-api.mjs            Render 同步 API
+  sql/                    SQLPub 初始化脚本
+source/
+  agent-xiaohuangshu.md   教程原稿
+scripts/
+  prepare-github-pages.mjs  Pages 规范 URL、robots 与 sitemap 生成
+```
+
+## 本地运行
+
+本项目使用 Node.js 22 与 pnpm 10。安装依赖后，可按以下命令启动、检查和构建。
+
+```bash
+pnpm install
+pnpm run dev
+pnpm run check
+pnpm run build:pages
+```
+
+`pnpm run dev` 启动本地阅读站；`pnpm run check` 执行 TypeScript 检查；`pnpm run build:pages` 会生成兼容 GitHub Pages 项目子路径的生产产物，并同步生成 `robots.txt`、`sitemap.xml` 与规范 URL。
+
+若需要本地运行云端同步 API，请先配置数据库环境变量，再执行：
+
+```bash
+pnpm run start:sync-api
+```
+
+详细的 Render、SQLPub 与 GitHub Actions 变量配置见 [云端同步部署说明](./RENDER_SYNC_DEPLOY.md)。
+
+## 部署方式
+
+推送到 `main` 分支后，GitHub Actions 会自动构建并发布至 GitHub Pages。公开前端使用 `CONTENT_API_URL` 变量连接 Render 服务；未设置该变量时，网站仍能以仓库内置教程运行，但作者修改只会保存在当前浏览器的加密本地快照中。
+
+部署到 Render 时，请使用仓库根目录的 [`render.yaml`](./render.yaml)。`DB_PASSWORD`、`AUTHOR_SESSION_SECRET` 与作者访问控制相关配置必须仅保存在 Render 环境变量中，不能提交到仓库。
+
+## 维护原则
+
+教程正文应保持可验证、可执行与面向初学者的写作方式。技术实现遵循公开阅读优先、作者操作受控、密钥不进入前端、内容发布可回溯的原则。提交代码时，应保留与产品和运行有关的说明，避免将临时任务、内部审计、设计过程或调试记录加入公开仓库。
+
+## 许可
+
+项目代码采用 MIT 许可；教程内容的使用与转载请遵循作者声明。
