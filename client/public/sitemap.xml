@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 部署到 GitHub Pages 后，将 YOUR_GITHUB_USERNAME 和 YOUR_REPOSITORY 替换为实际值。 -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://YOUR_GITHUB_USERNAME.github.io/YOUR_REPOSITORY/</loc>
+    <lastmod>2026-08-14</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# GitHub Pages 部署后请在 sitemap.xml 中替换为你的最终站点域名。
+Sitemap: /sitemap.xml
