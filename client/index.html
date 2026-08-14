@@ -26,6 +26,8 @@
         "@graph": [
           {
             "@type": "WebSite",
+            "@id": "https://infinite1994.github.io/agent-xiaohuangshu/#website",
+            "url": "https://infinite1994.github.io/agent-xiaohuangshu/",
             "name": "Agent小黄书",
             "alternateName": "Agent Xiaohuangshu",
             "inLanguage": "zh-CN",
@@ -33,10 +35,28 @@
             "keywords": ["Agent小黄书", "AI智能体", "智能体教程", "AI实践指南", "AI工作流"]
           },
           {
+            "@type": "WebPage",
+            "@id": "https://infinite1994.github.io/agent-xiaohuangshu/#webpage",
+            "url": "https://infinite1994.github.io/agent-xiaohuangshu/",
+            "name": "Agent小黄书",
+            "inLanguage": "zh-CN",
+            "isPartOf": { "@id": "https://infinite1994.github.io/agent-xiaohuangshu/#website" },
+            "primaryImageOfPage": {
+              "@type": "ImageObject",
+              "url": "https://infinite1994.github.io/agent-xiaohuangshu/offline-assets/agent-book-hero.webp"
+            }
+          },
+          {
             "@type": "Article",
+            "@id": "https://infinite1994.github.io/agent-xiaohuangshu/#article",
             "headline": "Agent小黄书：从零基础到可交付的能力",
             "inLanguage": "zh-CN",
             "description": "涵盖工具配置、工作流与实践方法的中文学习指南。",
+            "mainEntityOfPage": { "@id": "https://infinite1994.github.io/agent-xiaohuangshu/#webpage" },
+            "image": "https://infinite1994.github.io/agent-xiaohuangshu/offline-assets/agent-book-hero.webp",
+            "author": { "@type": "Person", "name": "INFINITE" },
+            "publisher": { "@type": "Organization", "name": "Agent小黄书" },
+            "dateModified": "2026-08-15",
             "about": ["Agent小黄书", "AI智能体", "AI工作流"]
           }
         ]
@@ -45,7 +65,21 @@
   </head>
   <body>
     <div id="root"></div>
-    <noscript><main><h1>Agent小黄书</h1><p>Agent小黄书是一份面向零基础学习者的 AI 实践指南，包含工具配置、工作流和实用方法。</p></main></noscript>
+    <noscript>
+      <main>
+        <p>INFINITE · AGENT小黄书 · LEARN AI FROM SCRATCH</p>
+        <h1>Agent小黄书：AI 智能体从零基础到可交付能力的实践指南</h1>
+        <p>Agent小黄书是一份面向零基础学习者的中文 AI 实践指南，系统讲解 AI 智能体、工具配置、Skill、开发工作流、安全合规与实用变现方法。</p>
+        <h2>教程内容</h2>
+        <ul>
+          <li>认识 AI 智能体与 2026 年工具格局</li>
+          <li>Claude Code、Codex、Hermes 与 Ollama 的安装配置</li>
+          <li>Skill 完全指南与智能体开发标准工作流</li>
+          <li>安全合规、命令速查和实用资源附录</li>
+        </ul>
+        <p>全书包含 33 个内容单元，可在线阅读并导出章节 Markdown 或 PDF。</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
     <script defer src="%VITE_ANALYTICS_ENDPOINT%/umami" data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
   </body>

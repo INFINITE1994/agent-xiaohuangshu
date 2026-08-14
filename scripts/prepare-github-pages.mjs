@@ -42,7 +42,7 @@ const enrichedIndexHtml = indexHtml
   .replace("</head>", `    ${canonicalTags}\n  </head>`);
 
 const robots = `User-agent: *\nAllow: /\nSitemap: ${siteUrl}sitemap.xml\n`;
-const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>${escapeXml(siteUrl)}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>1.0</priority>\n  </url>\n</urlset>\n`;
+const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n  <url>\n    <loc>${escapeXml(siteUrl)}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>1.0</priority>\n    <image:image>\n      <image:loc>${escapeXml(heroImageUrl)}</image:loc>\n      <image:title>Agent小黄书：AI 智能体实践指南</image:title>\n    </image:image>\n  </url>\n</urlset>\n`;
 const staticRouteFallback = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="robots" content="noindex" /><title>正在打开 Agent小黄书</title></head><body><script>
   (function () {
     var siteBase = ${JSON.stringify(new URL(siteUrl).pathname)};
