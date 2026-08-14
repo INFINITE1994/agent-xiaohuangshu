@@ -19,6 +19,8 @@
 
 > GitHub Actions 会自动根据仓库名称生成正确的默认 Pages 地址，同时写入生产产物的 `sitemap.xml`、`robots.txt`、canonical URL 与 Open Graph 图片地址。该相对构建方式支持 `<用户名>.github.io` 根路径站点及 `/<仓库名>/` 项目子路径站点；应用会在生产环境从入口资源地址识别项目子路径，无需将仓库名称写入源码。
 
+> 如需让作者网页编辑同步给所有访客，请按 [Render + SQLPub 内容同步部署](./RENDER_SYNC_DEPLOY.md) 创建 API，并在 GitHub Actions Variables 中设置 `CONTENT_API_URL`。未设置该变量时，网站会继续使用仓库内置教程与原有本地作者模式，不会把数据库凭据暴露到前端。
+
 ## 图片资源检查
 
 书封图与品牌图已纳入 `client/public/offline-assets/`。提交仓库前请确认该目录至少包含 `agent-book-hero.webp` 与 `agent-book-mark.webp`；构建后它们会自动复制到 `dist/public/offline-assets/`，不依赖 Manus 专属资源路径。
@@ -58,8 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+        # 自动读取 package.json 中的 packageManager：pnpm@10.4.1
       - uses: actions/setup-node@v4
         with:
           node-version: 22

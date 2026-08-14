@@ -17,9 +17,13 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VITE_CONTENT_API_URL: ${{ vars.CONTENT_API_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        # pnpm/action-setup 会读取 package.json 的 packageManager 字段。
+        # 不在此重复声明版本，以避免 GitHub Actions 的版本冲突。
       - uses: actions/setup-node@v4
         with:
           node-version: 22

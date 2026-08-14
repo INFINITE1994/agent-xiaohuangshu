@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: agent-xiaohuangshu-sync-api
+    runtime: node
+    buildCommand: pnpm install --frozen-lockfile
+    startCommand: pnpm run start:sync-api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "3311"
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: AUTHOR_ACCESS_HASH
+        sync: false
+      - key: AUTHOR_SESSION_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        sync: false

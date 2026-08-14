@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
+/* 橙皮工作台页面：保留米白纸张、深墨层级与橙皮朱索引色；云端发布状态只作为低干扰的内容元信息呈现。 */
 import {
   ArrowLeft,
   ArrowRight,
@@ -22,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { staticAssetUrl } from "@/lib/assets";
 import { clearAuthorSessionKey, loadAuthorSessionKey, saveAuthorSessionKey } from "@/lib/author-session-key-store";
+import { clearAuthorToken, ContentApiError, fetchPublishedContent, isCloudSyncEnabled, publishContent, startAuthorSession } from "@/lib/cloud-content";
 import { escapeHtml, renderMarkdown, tableToMarkdown } from "@/lib/markdown";
 import {
   AUTHOR_ACCESS_HASH,
@@ -39,6 +41,7 @@ import {
 import { copyInitialContent, displayNumber, excerpt, initialContent, makeDraft, mergePrivateOverrides, partOrder, type ContentItem, type Draft } from "@/lib/tutorial-content";
 
 export default function Home() {
+  const cloudSyncEnabled = isCloudSyncEnabled();
   const [content, setContent] = useState<ContentItem[]>(copyInitialContent);
   const [selectedId, setSelectedId] = useState(() => {
     const savedId = window.localStorage.getItem(SELECTED_STORAGE_KEY);
@@ -57,10 +60,23 @@ export default function Home() {
   const [authorCode, setAuthorCode] = useState("");
   const [authorError, setAuthorError] = useState("");
   const [authorBusy, setAuthorBusy] = useState(false);
+  const [cloudVersion, setCloudVersion] = useState(0);
+  const [cloudReady, setCloudReady] = useState(!cloudSyncEnabled);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const privateContentKeyRef = useRef<CryptoKey | null>(null);
 
   const persistContent = async (nextContent: ContentItem[]) => {
+    if (cloudSyncEnabled) {
+      try {
+        const publication = await publishContent(nextContent, cloudVersion);
+        setContent(publication.content ?? nextContent);
+        setCloudVersion(publication.version);
+        return true;
+      } catch (error) {
+        toast.error(error instanceof ContentApiError ? error.message : "云端发布失败，请检查 Render 内容服务后重试。");
+        return false;
+      }
+    }
     const key = privateContentKeyRef.current;
     if (!key) {
       toast.error("作者加密会话未建立，请重新解锁后再保存。\n");
@@ -154,6 +170,7 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (cloudSyncEnabled) return;
     let active = true;
     const restorePreviewAuthorSession = async () => {
       if (window.sessionStorage.getItem(AUTHOR_SESSION_FLAG_KEY) !== "active") return;
@@ -174,7 +191,31 @@ export default function Home() {
     };
     void restorePreviewAuthorSession();
     return () => { active = false; };
-  }, []);
+  }, [cloudSyncEnabled]);
+
+  useEffect(() => {
+    if (!cloudSyncEnabled) return;
+    let active = true;
+    const hydratePublishedContent = async () => {
+      try {
+        const publication = await fetchPublishedContent();
+        if (!active) return;
+        if (publication.content?.length) {
+          setContent(publication.content);
+          const savedSelectedId = window.localStorage.getItem(SELECTED_STORAGE_KEY);
+          persistSelectedId(publication.content.some((item) => item.id === savedSelectedId) ? savedSelectedId ?? "" : publication.content[0]?.id ?? "");
+        }
+        setCloudVersion(publication.version);
+        setCloudReady(true);
+      } catch (error) {
+        if (!active) return;
+        setCloudReady(false);
+        toast.error(error instanceof ContentApiError ? error.message : "云端内容暂时无法加载，正在显示仓库内置教程。");
+      }
+    };
+    void hydratePublishedContent();
+    return () => { active = false; };
+  }, [cloudSyncEnabled]);
 
   useEffect(() => {
     if (content.length && !content.some((item) => item.id === selectedId)) {
@@ -277,7 +318,7 @@ export default function Home() {
       number: draft.number.trim() || "自定义",
       title: draft.title.trim(),
       markdown: draft.markdown.trim(),
-      modifiedAt: `个人版本 · ${now}`,
+      modifiedAt: `${cloudSyncEnabled ? "云端发布" : "个人版本"} · ${now}`,
       isCustom: !editingId || content.find((item) => item.id === editingId)?.isCustom === true,
     };
 
@@ -285,7 +326,7 @@ export default function Home() {
     if (!(await persistContent(nextContent))) return;
     persistSelectedId(next.id);
     setDrawerOpen(false);
-    toast.success(editingId ? "本节已保存为当前浏览器的个人版本。" : "新的实践笔记已加入手册。");
+    toast.success(cloudSyncEnabled ? (editingId ? "本节已发布，访客刷新后即可查看。" : "新的实践笔记已发布给所有访客。") : (editingId ? "本节已保存为当前浏览器的个人版本。" : "新的实践笔记已加入手册。"));
   };
 
   const confirmDelete = async () => {
@@ -298,7 +339,7 @@ export default function Home() {
     const nextContent = content.filter((item) => item.id !== pendingDelete.id);
     if (!(await persistContent(nextContent))) return;
     if (pendingDelete.id === selectedId) persistSelectedId(nextContent[0]?.id ?? "");
-    toast.success(`已从当前浏览器移除「${pendingDelete.title}」。`);
+    toast.success(cloudSyncEnabled ? `已发布删除「${pendingDelete.title}」。` : `已从当前浏览器移除「${pendingDelete.title}」。`);
     setPendingDelete(null);
   };
 
@@ -421,6 +462,10 @@ export default function Home() {
     setAuthorBusy(true);
     setAuthorError("");
     try {
+      if (cloudSyncEnabled && !cloudReady) {
+        setAuthorError("云端内容尚未准备就绪，请稍后再试。");
+        return;
+      }
       const hashedCode = await hashAuthorCode(authorCode.trim());
       if (hashedCode !== AUTHOR_ACCESS_HASH) {
         setAuthorError("访问码不正确，请重新输入。");
@@ -428,6 +473,7 @@ export default function Home() {
       }
       const privateContentKey = await derivePrivateContentKey(authorCode.trim());
       privateContentKeyRef.current = privateContentKey;
+      if (cloudSyncEnabled) await startAuthorSession(authorCode.trim());
       try {
         await saveAuthorSessionKey(privateContentKey);
         window.sessionStorage.setItem(AUTHOR_SESSION_FLAG_KEY, "active");
@@ -436,9 +482,11 @@ export default function Home() {
         window.sessionStorage.removeItem(AUTHOR_SESSION_FLAG_KEY);
         window.sessionStorage.removeItem(AUTHOR_MANAGEMENT_SESSION_FLAG_KEY);
       }
-      const hydratedContent = await hydratePrivateContent(privateContentKey);
-      setContent(hydratedContent);
-      persistSelectedId(hydratedContent.some((item) => item.id === selectedId) ? selectedId : hydratedContent[0]?.id ?? "");
+      if (!cloudSyncEnabled) {
+        const hydratedContent = await hydratePrivateContent(privateContentKey);
+        setContent(hydratedContent);
+        persistSelectedId(hydratedContent.some((item) => item.id === selectedId) ? selectedId : hydratedContent[0]?.id ?? "");
+      }
       setIsAuthor(true);
       setAuthorCode("");
       setAuthorDialogOpen(false);
@@ -452,11 +500,12 @@ export default function Home() {
 
   const exitAuthorMode = () => {
     privateContentKeyRef.current = null;
+    clearAuthorToken();
     window.sessionStorage.removeItem(AUTHOR_MANAGEMENT_SESSION_FLAG_KEY);
     setIsAuthor(false);
     setManagerOpen(false);
     setDrawerOpen(false);
-    toast.message("已退出管理模式，已保存的阅读内容会继续保留为当前版本。");
+    toast.message(cloudSyncEnabled ? "已退出管理模式，已发布内容会继续供所有访客阅读。" : "已退出管理模式，已保存的阅读内容会继续保留为当前版本。");
   };
 
   const renderSectionLinks = (compact = false) => (
@@ -546,7 +595,7 @@ export default function Home() {
 
             <section className="reading-shell mt-9 lg:mt-12" id="reading-canvas">
               <div className="reading-heading border-b border-[#20201d]/14 pb-6">
-                <div><p className="eyebrow">{selectedItem.part}</p><div className="mt-3 flex flex-wrap items-center justify-between gap-5"><h2 className="content-title">正在阅读</h2><div className="stat-rack"><div><strong>{content.length}</strong><span>内容单元</span></div><div><strong>{partOrder.length}</strong><span>篇章与附录</span></div><div><strong>本地</strong><span>可编辑</span></div></div></div></div>
+                <div><p className="eyebrow">{selectedItem.part}</p><div className="mt-3 flex flex-wrap items-center justify-between gap-5"><h2 className="content-title">正在阅读</h2><div className="stat-rack"><div><strong>{content.length}</strong><span>内容单元</span></div><div><strong>{partOrder.length}</strong><span>篇章与附录</span></div><div><strong>{cloudSyncEnabled ? "云端" : "本地"}</strong><span>{cloudSyncEnabled ? "已发布" : "可编辑"}</span></div></div></div></div>
               </div>
               <div className="print-hidden flex flex-col gap-3 border-b border-[#20201d]/10 py-5 sm:flex-row sm:items-center sm:justify-between">
                 <label className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索教程正文、章节标题" aria-label="搜索教程内容" />{query && <button type="button" onClick={() => setQuery("")} aria-label="清空搜索"><X size={15} /></button>}</label>
@@ -581,11 +630,11 @@ export default function Home() {
         <div className="print-hidden fixed inset-0 z-50 bg-[#20201d]/35 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="manager-title">
           <div className="manager-drawer absolute right-0 top-0 flex h-full w-full max-w-[700px] flex-col overflow-hidden bg-[#f7f3eb] shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#20201d]/12 px-6 py-5 sm:px-9">
-              <div><p className="eyebrow">本地内容工作台</p><h2 id="manager-title" className="mt-1 font-serif text-2xl font-bold">管理全部内容</h2></div>
+              <div><p className="eyebrow">{cloudSyncEnabled ? "云端内容工作台" : "本地内容工作台"}</p><h2 id="manager-title" className="mt-1 font-serif text-2xl font-bold">管理全部内容</h2></div>
               <button type="button" onClick={() => setManagerOpen(false)} className="icon-button" aria-label="关闭内容管理"><X size={20} /></button>
             </div>
             <div className="border-b border-[#20201d]/10 px-6 py-4 sm:px-9">
-              <p className="text-sm leading-6 text-[#20201d]/64">这里显示当前浏览器保存的全部内容。编辑、删除或新增后会立即保存在本地；恢复原始教程可撤销全部本地修改。</p>
+              <p className="text-sm leading-6 text-[#20201d]/64">{cloudSyncEnabled ? "这里显示已发布给所有访客的云端内容。保存、删除或新增后会同步发布；恢复原始教程会覆盖当前线上版本。" : "这里显示当前浏览器保存的全部内容。编辑、删除或新增后会立即保存在本地；恢复原始教程可撤销全部本地修改。"}</p>
               <div className="format-feature-callout mt-4"><span className="eyebrow">可视化排版</span><strong>表格 · 代码块 · 字号 · 文字颜色</strong><p>点击“新建并排版”，或在任一内容右侧选择“编辑排版”，即可打开完整排版工具栏。</p></div>
               <button type="button" onClick={() => { setManagerOpen(false); openCreate(); }} className="add-content-button mt-4"><FilePlus2 size={16} /> 新建并排版</button>
             </div>
@@ -613,7 +662,7 @@ export default function Home() {
       {drawerOpen && (
         <div className="print-hidden fixed inset-0 z-50 bg-[#20201d]/35 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="editor-title">
           <div className="editor-drawer absolute right-0 top-0 h-full w-full max-w-[700px] overflow-y-auto bg-[#f7f3eb] shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#20201d]/12 bg-[#f7f3eb]/95 px-6 py-5 backdrop-blur-xl sm:px-9"><div><p className="eyebrow">本地内容工作台</p><h2 id="editor-title" className="mt-1 font-serif text-2xl font-bold">{editingId ? "编辑当前内容" : "新增实践笔记"}</h2></div><button type="button" onClick={() => setDrawerOpen(false)} className="icon-button" aria-label="关闭编辑器"><X size={20} /></button></div>
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#20201d]/12 bg-[#f7f3eb]/95 px-6 py-5 backdrop-blur-xl sm:px-9"><div><p className="eyebrow">{cloudSyncEnabled ? "云端内容工作台" : "本地内容工作台"}</p><h2 id="editor-title" className="mt-1 font-serif text-2xl font-bold">{editingId ? "编辑当前内容" : "新增实践笔记"}</h2></div><button type="button" onClick={() => setDrawerOpen(false)} className="icon-button" aria-label="关闭编辑器"><X size={20} /></button></div>
             <form onSubmit={handleSave} className="space-y-6 px-6 py-7 sm:px-9">
               <div className="format-editor-intro"><span className="eyebrow">现在可以直接排版</span><p>选择正文中的文字，再使用下方工具栏调整<strong>字号与颜色</strong>；也可一键插入<strong>表格、代码块、引用和标题</strong>。</p></div>
               <div className="form-grid"><label><span>归属篇章</span><input value={draft.part} onChange={(event) => setDraft((value) => ({ ...value, part: event.target.value }))} placeholder="例如：我的实践笔记" /></label><label><span>章节索引</span><input value={draft.number} onChange={(event) => setDraft((value) => ({ ...value, number: event.target.value }))} placeholder="例如：25 或 附F" /></label></div>
@@ -621,14 +670,14 @@ export default function Home() {
               <div className="form-field"><span>正文与排版</span><div className="editor-toolbar" role="toolbar" aria-label="文本排版工具"><span className="toolbar-label">选中文字后操作</span><button type="button" onClick={() => wrapSelectedText("**", "**", "重点文字")} aria-label="加粗文字"><strong>B</strong></button><button type="button" onClick={() => wrapSelectedText("*", "*", "强调文字")} aria-label="斜体文字"><em>I</em></button><button type="button" onClick={() => insertBlock("## 小节标题")} aria-label="插入二级标题">H2</button><button type="button" onClick={() => insertBlock("> 这里填写提示、注释或重要结论。")} aria-label="插入引用提示">引用</button><span className="toolbar-divider" /><button type="button" onClick={() => wrapSelectedText("{{size:small}}", "{{/size}}", "较小文字")} aria-label="缩小字号">小</button><button type="button" onClick={() => wrapSelectedText("{{size:large}}", "{{/size}}", "较大文字")} aria-label="放大字号">大</button><button type="button" onClick={() => wrapSelectedText("{{size:xl}}", "{{/size}}", "重点大字")} aria-label="最大字号">特大</button><span className="toolbar-divider" /><button type="button" className="color-orange" onClick={() => wrapSelectedText("{{color:orange}}", "{{/color}}", "橙皮朱文字")} aria-label="设为橙皮朱">橙</button><button type="button" className="color-ink" onClick={() => wrapSelectedText("{{color:ink}}", "{{/color}}", "深墨文字")} aria-label="设为深墨">墨</button><button type="button" className="color-blue" onClick={() => wrapSelectedText("{{color:blue}}", "{{/color}}", "蓝灰文字")} aria-label="设为蓝灰">蓝</button><button type="button" className="color-green" onClick={() => wrapSelectedText("{{color:green}}", "{{/color}}", "深绿文字")} aria-label="设为深绿">绿</button><span className="toolbar-divider" /><button type="button" onClick={() => insertBlock("| 项目 | 说明 | 备注 |\n| --- | --- | --- |\n| 内容 | 在此填写 | 在此填写 |")} aria-label="插入表格">表格</button><button type="button" onClick={() => insertBlock("```ts\nconst message = '在这里写代码';\nconsole.log(message);\n```")} aria-label="插入代码块">代码</button></div><textarea ref={editorRef} rows={18} value={draft.markdown} onChange={(event) => setDraft((value) => ({ ...value, markdown: event.target.value }))} placeholder="可使用工具栏插入标题、表格、代码块、字号与文字颜色；也支持直接编辑 Markdown。" /></div>
               <div className="editor-preview"><div className="editor-preview-head"><span className="eyebrow">实时阅读预览</span><span>保存后将以此样式显示与导出</span></div><div className="markdown-body compact" dangerouslySetInnerHTML={{ __html: draftMarkdownHtml }} /></div>
               <div className="form-grid"><label><span>内容类型</span><select value={draft.kind} onChange={(event) => setDraft((value) => ({ ...value, kind: event.target.value as ContentItem["kind"] }))}><option value="chapter">正式章节</option><option value="supplement">导读或补充</option><option value="appendix">附录</option><option value="introduction">前言</option></select></label><div className="editor-tip"><BookOpen size={15} /><span>保存后，Markdown 会被渲染为当前手册的阅读版式。</span></div></div>
-              <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#20201d]/10 pt-6"><p className="max-w-xs text-xs leading-5 text-[#20201d]/52">原始教程正文已导入。编辑仅会保存到这台设备的浏览器；可随时恢复原始内容。</p><div className="flex gap-2"><button type="button" onClick={() => setDrawerOpen(false)} className="top-action">取消</button><button type="submit" className="top-action top-action-primary"><Check size={16} /> 保存内容</button></div></div>
+              <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#20201d]/10 pt-6"><p className="max-w-xs text-xs leading-5 text-[#20201d]/52">{cloudSyncEnabled ? "保存会同步发布到云端，所有访客刷新页面后都可阅读最新版本。" : "原始教程正文已导入。编辑仅会保存到这台设备的浏览器；可随时恢复原始内容。"}</p><div className="flex gap-2"><button type="button" onClick={() => setDrawerOpen(false)} className="top-action">取消</button><button type="submit" className="top-action top-action-primary"><Check size={16} /> {cloudSyncEnabled ? "保存并发布" : "保存内容"}</button></div></div>
             </form>
           </div>
         </div>
       )}
 
       {pendingDelete && (
-        <div className="print-hidden fixed inset-0 z-[60] grid place-items-center bg-[#20201d]/45 p-5 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><div className="delete-dialog w-full max-w-md bg-[#f7f3eb] p-7 shadow-2xl"><div className="flex items-start justify-between gap-4"><span className="delete-icon"><Trash2 size={19} /></span><button type="button" onClick={() => setPendingDelete(null)} className="icon-button" aria-label="关闭删除确认"><X size={19} /></button></div><p className="eyebrow mt-6">不可撤销的本地修改</p><h2 id="delete-title" className="mt-2 font-serif text-2xl font-bold">确定移除这一节？</h2><p className="mt-3 leading-7 text-[#20201d]/66">「{pendingDelete.title}」会从当前浏览器保存的手册中删除。恢复原始教程可重新导入。</p><div className="mt-7 flex justify-end gap-2"><button type="button" onClick={() => setPendingDelete(null)} className="top-action">保留内容</button><button type="button" onClick={confirmDelete} className="delete-button"><Trash2 size={16} /> 确认删除</button></div></div></div>
+        <div className="print-hidden fixed inset-0 z-[60] grid place-items-center bg-[#20201d]/45 p-5 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><div className="delete-dialog w-full max-w-md bg-[#f7f3eb] p-7 shadow-2xl"><div className="flex items-start justify-between gap-4"><span className="delete-icon"><Trash2 size={19} /></span><button type="button" onClick={() => setPendingDelete(null)} className="icon-button" aria-label="关闭删除确认"><X size={19} /></button></div><p className="eyebrow mt-6">{cloudSyncEnabled ? "不可撤销的云端发布" : "不可撤销的本地修改"}</p><h2 id="delete-title" className="mt-2 font-serif text-2xl font-bold">确定移除这一节？</h2><p className="mt-3 leading-7 text-[#20201d]/66">{cloudSyncEnabled ? `「${pendingDelete.title}」会从所有访客读取的已发布手册中删除。` : `「${pendingDelete.title}」会从当前浏览器保存的手册中删除。恢复原始教程可重新导入。`}</p><div className="mt-7 flex justify-end gap-2"><button type="button" onClick={() => setPendingDelete(null)} className="top-action">保留内容</button><button type="button" onClick={confirmDelete} className="delete-button"><Trash2 size={16} /> 确认删除</button></div></div></div>
       )}
 
       {authorDialogOpen && (
