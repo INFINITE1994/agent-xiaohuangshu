@@ -16,6 +16,11 @@ export type UploadedContentImage = {
   byteSize: number;
 };
 
+export type ContentLibraryImage = UploadedContentImage & {
+  createdAt: string;
+  usedInPublishedContent: boolean;
+};
+
 export const MAXIMUM_CONTENT_IMAGE_BYTES = 2.5 * 1024 * 1024;
 
 export class ContentApiError extends Error {
@@ -79,6 +84,15 @@ export const uploadContentImage = async (file: File) => {
     body: JSON.stringify({ fileName: file.name, mimeType: file.type, dataBase64: await readFileAsBase64(file) }),
   });
 };
+
+export const listContentImages = () => request<{ images: ContentLibraryImage[] }>("/v1/images", {
+  headers: { Authorization: `Bearer ${readAuthorToken()}` },
+});
+
+export const deleteContentImage = (imageId: string) => request<void>(`/v1/images/${imageId}`, {
+  method: "DELETE",
+  headers: { Authorization: `Bearer ${readAuthorToken()}` },
+});
 
 export const publishContent = (content: ContentItem[], expectedVersion: number) => request<PublishedContent>("/v1/content", {
   method: "PUT",

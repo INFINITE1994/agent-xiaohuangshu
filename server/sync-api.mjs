@@ -104,6 +104,15 @@ async function readPublication() {
   return { content: JSON.parse(row.contentJson), version: Number(row.version), publishedAt: row.publishedAt };
 }
 
+function imageUrl(request, imageId) {
+  const forwardedProtocol = request.headers["x-forwarded-proto"]?.toString().split(",")[0]?.trim();
+  return `${forwardedProtocol || request.protocol}://${request.get("host")}/v1/images/${imageId}`;
+}
+
+function isImageUsedByPublishedContent(content, imageId) {
+  return Array.isArray(content) && content.some((item) => typeof item?.markdown === "string" && item.markdown.includes(`/v1/images/${imageId}`));
+}
+
 app.use(express.json({ limit: "5mb" }));
 app.use((request, response, next) => {
   const origin = request.headers.origin;
@@ -111,7 +120,7 @@ app.use((request, response, next) => {
   if (origin) response.setHeader("Access-Control-Allow-Origin", origin);
   response.setHeader("Vary", "Origin");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  response.setHeader("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS");
   if (request.method === "OPTIONS") return response.sendStatus(204);
   return next();
 });
@@ -154,6 +163,26 @@ app.get("/v1/images/:imageId", async (request, response, next) => {
   }
 });
 
+app.get("/v1/images", async (request, response, next) => {
+  if (!verifyToken(request.headers.authorization)) return response.status(401).json({ error: "作者会话已失效，请重新解锁。" });
+  try {
+    const [imageQuery, publication] = await Promise.all([
+      pool.execute("SELECT image_id AS id, file_name AS fileName, mime_type AS mimeType, byte_size AS byteSize, DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS createdAt FROM agent_content_images ORDER BY created_at DESC"),
+      readPublication(),
+    ]);
+    return response.json({
+      images: imageQuery[0].map((image) => ({
+        ...image,
+        byteSize: Number(image.byteSize),
+        url: imageUrl(request, image.id),
+        usedInPublishedContent: isImageUsedByPublishedContent(publication.content, image.id),
+      })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.post("/v1/images", async (request, response, next) => {
   if (!verifyToken(request.headers.authorization)) return response.status(401).json({ error: "作者会话已失效，请重新解锁。" });
   const { fileName, mimeType, dataBase64 } = request.body ?? {};
@@ -176,15 +205,30 @@ app.post("/v1/images", async (request, response, next) => {
       "INSERT INTO agent_content_images (image_id, file_name, mime_type, image_data, byte_size) VALUES (?, ?, ?, ?, ?)",
       [imageId, safeFileName, mimeType, imageData, imageData.length],
     );
-    const forwardedProtocol = request.headers["x-forwarded-proto"]?.toString().split(",")[0]?.trim();
-    const publicProtocol = forwardedProtocol || request.protocol;
     return response.status(201).json({
       id: imageId,
-      url: `${publicProtocol}://${request.get("host")}/v1/images/${imageId}`,
+      url: imageUrl(request, imageId),
       fileName: safeFileName,
       mimeType,
       byteSize: imageData.length,
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.delete("/v1/images/:imageId", async (request, response, next) => {
+  if (!verifyToken(request.headers.authorization)) return response.status(401).json({ error: "作者会话已失效，请重新解锁。" });
+  const imageId = typeof request.params.imageId === "string" ? request.params.imageId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(imageId)) return response.status(404).json({ error: "未找到该图片。" });
+  try {
+    const publication = await readPublication();
+    if (isImageUsedByPublishedContent(publication.content, imageId)) {
+      return response.status(409).json({ error: "图片正在已发布章节中使用，请先移除正文中的图片链接并保存发布。" });
+    }
+    const [result] = await pool.execute("DELETE FROM agent_content_images WHERE image_id = ?", [imageId]);
+    if (!result.affectedRows) return response.status(404).json({ error: "未找到该图片。" });
+    return response.status(204).end();
   } catch (error) {
     return next(error);
   }

@@ -1,11 +1,12 @@
 /* 橙皮作者工作台：以编辑桌、纸质章节卡和实时排版预览组织管理流程；强调深墨阅读层级与橙皮朱发布操作。 */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "wouter";
-import { BookOpen, Check, ChevronLeft, CloudUpload, FilePlus2, FileText, ImagePlus, LayoutList, LoaderCircle, LockKeyhole, LogOut, Pencil, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
+import { BookOpen, Check, ChevronLeft, CloudUpload, FilePlus2, FileText, ImagePlus, Images, LayoutList, LoaderCircle, LockKeyhole, LogOut, Pencil, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { staticAssetUrl } from "@/lib/assets";
 import { clearAuthorSessionKey, loadAuthorSessionKey, saveAuthorSessionKey } from "@/lib/author-session-key-store";
-import { clearAuthorToken, ContentApiError, fetchPublishedContent, isCloudSyncEnabled, MAXIMUM_CONTENT_IMAGE_BYTES, publishContent, readAuthorToken, startAuthorSession, uploadContentImage } from "@/lib/cloud-content";
+import { clearAuthorToken, ContentApiError, deleteContentImage, fetchPublishedContent, isCloudSyncEnabled, listContentImages, MAXIMUM_CONTENT_IMAGE_BYTES, publishContent, readAuthorToken, startAuthorSession, type ContentLibraryImage, uploadContentImage } from "@/lib/cloud-content";
+import { prepareContentImage, type PreparedContentImage } from "@/lib/image-processing";
 import { renderMarkdown } from "@/lib/markdown";
 import {
   AUTHOR_ACCESS_HASH,
@@ -23,6 +24,7 @@ import {
 import { copyInitialContent, displayNumber, initialContent, makeDraft, mergePrivateOverrides, partOrder, type ContentItem, type Draft } from "@/lib/tutorial-content";
 
 const formatToday = () => new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).replaceAll("/", ".");
+const formatImageSize = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 
 export default function AuthorWorkbench() {
   const [, setLocation] = useLocation();
@@ -40,9 +42,16 @@ export default function AuthorWorkbench() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(makeDraft());
   const [pendingDelete, setPendingDelete] = useState<ContentItem | null>(null);
-  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const [pendingImage, setPendingImage] = useState<PreparedContentImage | null>(null);
   const [imageAlt, setImageAlt] = useState("");
   const [imageUploading, setImageUploading] = useState(false);
+  const [imagePreparing, setImagePreparing] = useState(false);
+  const [imageDropActive, setImageDropActive] = useState(false);
+  const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
+  const [imageLibrary, setImageLibrary] = useState<ContentLibraryImage[]>([]);
+  const [imageLibraryLoading, setImageLibraryLoading] = useState(false);
+  const [pendingImageDeletion, setPendingImageDeletion] = useState<ContentLibraryImage | null>(null);
+  const [imageDeleting, setImageDeleting] = useState(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const privateContentKeyRef = useRef<CryptoKey | null>(null);
@@ -203,22 +212,41 @@ export default function AuthorWorkbench() {
     restoreEditorSelection(cursor, cursor);
   };
 
-  const selectImageFile = (file: File | null) => {
+  const refreshImageLibrary = async () => {
+    if (!cloudSyncEnabled) return;
+    setImageLibraryLoading(true);
+    try {
+      const library = await listContentImages();
+      setImageLibrary(library.images);
+    } catch (error) {
+      toast.error(error instanceof ContentApiError ? error.message : "无法读取历史图片，请稍后重试。");
+    } finally {
+      setImageLibraryLoading(false);
+    }
+  };
+
+  const selectImageFile = async (file: File | null) => {
     if (!file) return;
     if (!cloudSyncEnabled) {
       toast.error("当前环境未启用云端同步，无法向所有访客共享图片。");
       return;
     }
-    if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type)) {
-      toast.error("仅支持 JPG、PNG 或 WebP 图片。");
-      return;
+    setImagePreparing(true);
+    try {
+      const prepared = await prepareContentImage(file);
+      if (prepared.outputBytes > MAXIMUM_CONTENT_IMAGE_BYTES) {
+        toast.error("压缩后的图片仍超过 2.5 MB，请使用更小的原图。");
+        return;
+      }
+      setPendingImage(prepared);
+      setImageAlt(file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "));
+      const reduction = Math.max(0, Math.round((1 - prepared.outputBytes / prepared.originalBytes) * 100));
+      toast.success(prepared.compressed ? `已在本地压缩图片，体积减少 ${reduction}%。` : "图片无需额外压缩，已准备插入。");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "图片准备失败，请重试。");
+    } finally {
+      setImagePreparing(false);
     }
-    if (!file.size || file.size > MAXIMUM_CONTENT_IMAGE_BYTES) {
-      toast.error("图片大小需在 2.5 MB 以内。");
-      return;
-    }
-    setPendingImage(file);
-    setImageAlt(file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "));
   };
 
   const uploadAndInsertImage = async () => {
@@ -228,12 +256,13 @@ export default function AuthorWorkbench() {
     }
     setImageUploading(true);
     try {
-      const uploaded = await uploadContentImage(pendingImage);
-      const alt = (imageAlt.trim() || pendingImage.name.replace(/\.[^.]+$/, "图像")).replace(/[\[\]\n]/g, " ");
+      const uploaded = await uploadContentImage(pendingImage.file);
+      const alt = (imageAlt.trim() || pendingImage.file.name.replace(/\.[^.]+$/, "图像")).replace(/[\[\]\n]/g, " ");
       insertBlock(`![${alt}](${uploaded.url})`);
       setPendingImage(null);
       setImageAlt("");
       if (imageInputRef.current) imageInputRef.current.value = "";
+      void refreshImageLibrary();
       toast.success("图片已上传并插入正文；请保存并发布章节。" );
     } catch (error) {
       toast.error(error instanceof ContentApiError ? error.message : "图片上传失败，请稍后重试。");
@@ -241,6 +270,32 @@ export default function AuthorWorkbench() {
       setImageUploading(false);
     }
   };
+
+  const insertLibraryImage = (image: ContentLibraryImage) => {
+    const alt = image.fileName.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ");
+    insertBlock(`![${alt}](${image.url})`);
+    setImageLibraryOpen(false);
+    toast.success("图片已插入当前光标；请保存并发布章节。");
+  };
+
+  const confirmImageDelete = async () => {
+    if (!pendingImageDeletion) return;
+    setImageDeleting(true);
+    try {
+      await deleteContentImage(pendingImageDeletion.id);
+      setImageLibrary((images) => images.filter((image) => image.id !== pendingImageDeletion.id));
+      setPendingImageDeletion(null);
+      toast.success("已删除未被正文引用的图片。");
+    } catch (error) {
+      toast.error(error instanceof ContentApiError ? error.message : "图片删除失败，请稍后重试。");
+    } finally {
+      setImageDeleting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthor && cloudSyncEnabled) void refreshImageLibrary();
+  }, [isAuthor, cloudSyncEnabled]);
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -262,6 +317,7 @@ export default function AuthorWorkbench() {
     if (!(await persistContent(nextContent))) return;
     persistSelectedId(next.id);
     setEditingId(next.id);
+    if (cloudSyncEnabled) void refreshImageLibrary();
     toast.success(cloudSyncEnabled ? "本节已保存并发布，访客刷新后即可查看。" : "本节已加密保存到当前浏览器。");
   };
 
@@ -391,7 +447,41 @@ export default function AuthorWorkbench() {
           <form onSubmit={handleSave} className="workspace-form">
             <div className="form-grid"><label><span>归属篇章</span><input value={draft.part} onChange={(event) => setDraft((value) => ({ ...value, part: event.target.value }))} placeholder="例如：我的实践笔记" /></label><label><span>章节索引</span><input value={draft.number} onChange={(event) => setDraft((value) => ({ ...value, number: event.target.value }))} placeholder="例如：25 或 附F" /></label></div>
             <label className="form-field"><span>章节标题</span><input value={draft.title} onChange={(event) => setDraft((value) => ({ ...value, title: event.target.value }))} placeholder="写清这节内容要解决的问题" /></label>
-            <div className="form-field"><span>正文与排版</span><div className="editor-toolbar" role="toolbar" aria-label="文本排版工具"><span className="toolbar-label">选中文字后操作</span><button type="button" onClick={() => wrapSelectedText("**", "**", "重点文字")} aria-label="加粗文字"><strong>B</strong></button><button type="button" onClick={() => wrapSelectedText("*", "*", "强调文字")} aria-label="斜体文字"><em>I</em></button><button type="button" onClick={() => insertBlock("## 小节标题")} aria-label="插入二级标题">H2</button><button type="button" onClick={() => insertBlock("> 这里填写提示、注释或重要结论。")} aria-label="插入引用提示">引用</button><span className="toolbar-divider" /><button type="button" onClick={() => wrapSelectedText("{{size:small}}", "{{/size}}", "较小文字")} aria-label="缩小字号">小</button><button type="button" onClick={() => wrapSelectedText("{{size:large}}", "{{/size}}", "较大文字")} aria-label="放大字号">大</button><button type="button" onClick={() => wrapSelectedText("{{size:xl}}", "{{/size}}", "重点大字")} aria-label="最大字号">特大</button><span className="toolbar-divider" /><button type="button" className="color-orange" onClick={() => wrapSelectedText("{{color:orange}}", "{{/color}}", "橙皮朱文字")} aria-label="设为橙皮朱">橙</button><button type="button" className="color-ink" onClick={() => wrapSelectedText("{{color:ink}}", "{{/color}}", "深墨文字")} aria-label="设为深墨">墨</button><button type="button" className="color-blue" onClick={() => wrapSelectedText("{{color:blue}}", "{{/color}}", "蓝灰文字")} aria-label="设为蓝灰">蓝</button><button type="button" className="color-green" onClick={() => wrapSelectedText("{{color:green}}", "{{/color}}", "深绿文字")} aria-label="设为深绿">绿</button><span className="toolbar-divider" /><button type="button" onClick={() => insertBlock("| 项目 | 说明 | 备注 |\n| --- | --- | --- |\n| 内容 | 在此填写 | 在此填写 |")} aria-label="插入表格">表格</button><button type="button" onClick={() => insertBlock("```ts\nconst message = '在这里写代码';\nconsole.log(message);\n```")} aria-label="插入代码块">代码</button></div><input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => selectImageFile(event.target.files?.[0] ?? null)} /><div className="editor-image-upload"><div><span className="eyebrow">IMAGE INSERT</span><p>{pendingImage ? `已选择：${pendingImage.name}` : cloudSyncEnabled ? "上传 JPG、PNG 或 WebP（单张不超过 2.5 MB），随后插入当前光标。" : "公开云端同步启用后，可在此上传共享图片。"}</p></div><button type="button" className="top-action" onClick={() => imageInputRef.current?.click()} disabled={!cloudSyncEnabled || imageUploading}><ImagePlus size={16} /> 选择图片</button>{pendingImage && <><input value={imageAlt} onChange={(event) => setImageAlt(event.target.value)} aria-label="图片替代文本" placeholder="图片说明（建议填写）" /><button type="button" className="top-action top-action-primary" onClick={() => void uploadAndInsertImage()} disabled={imageUploading}>{imageUploading ? <LoaderCircle className="animate-spin" size={16} /> : <Upload size={16} />} {imageUploading ? "正在上传" : "上传并插入"}</button></>}</div><textarea ref={editorRef} rows={23} value={draft.markdown} onChange={(event) => setDraft((value) => ({ ...value, markdown: event.target.value }))} placeholder="可使用工具栏插入标题、表格、代码块、图片、字号与文字颜色；也支持直接编辑 Markdown。" /></div>
+            <div className="form-field">
+              <span>正文与排版</span>
+              <div className="editor-toolbar" role="toolbar" aria-label="文本排版工具">
+                <span className="toolbar-label">选中文字后操作</span>
+                <button type="button" onClick={() => wrapSelectedText("**", "**", "重点文字")} aria-label="加粗文字"><strong>B</strong></button>
+                <button type="button" onClick={() => wrapSelectedText("*", "*", "强调文字")} aria-label="斜体文字"><em>I</em></button>
+                <button type="button" onClick={() => insertBlock("## 小节标题")} aria-label="插入二级标题">H2</button>
+                <button type="button" onClick={() => insertBlock("> 这里填写提示、注释或重要结论。")} aria-label="插入引用提示">引用</button>
+                <span className="toolbar-divider" />
+                <button type="button" onClick={() => wrapSelectedText("{{size:small}}", "{{/size}}", "较小文字")} aria-label="缩小字号">小</button>
+                <button type="button" onClick={() => wrapSelectedText("{{size:large}}", "{{/size}}", "较大文字")} aria-label="放大字号">大</button>
+                <button type="button" onClick={() => wrapSelectedText("{{size:xl}}", "{{/size}}", "重点大字")} aria-label="最大字号">特大</button>
+                <span className="toolbar-divider" />
+                <button type="button" className="color-orange" onClick={() => wrapSelectedText("{{color:orange}}", "{{/color}}", "橙皮朱文字")} aria-label="设为橙皮朱">橙</button>
+                <button type="button" className="color-ink" onClick={() => wrapSelectedText("{{color:ink}}", "{{/color}}", "深墨文字")} aria-label="设为深墨">墨</button>
+                <button type="button" className="color-blue" onClick={() => wrapSelectedText("{{color:blue}}", "{{/color}}", "蓝灰文字")} aria-label="设为蓝灰">蓝</button>
+                <button type="button" className="color-green" onClick={() => wrapSelectedText("{{color:green}}", "{{/color}}", "深绿文字")} aria-label="设为深绿">绿</button>
+                <span className="toolbar-divider" />
+                <button type="button" onClick={() => insertBlock("| 项目 | 说明 | 备注 |\n| --- | --- | --- |\n| 内容 | 在此填写 | 在此填写 |")} aria-label="插入表格">表格</button>
+                <button type="button" onClick={() => insertBlock("```ts\nconst message = '在这里写代码';\nconsole.log(message);\n```")} aria-label="插入代码块">代码</button>
+              </div>
+              <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => void selectImageFile(event.target.files?.[0] ?? null)} />
+              <div className={`editor-image-upload ${imageDropActive ? "is-dragging" : ""}`} onDragEnter={(event) => { event.preventDefault(); setImageDropActive(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setImageDropActive(false); }} onDrop={(event) => { event.preventDefault(); setImageDropActive(false); void selectImageFile(event.dataTransfer.files?.[0] ?? null); }}>
+                <div>
+                  <span className="eyebrow">IMAGE INSERT</span>
+                  <p>{imagePreparing ? "正在浏览器本地压缩图片…" : pendingImage ? `已准备：${pendingImage.file.name} · ${formatImageSize(pendingImage.outputBytes)} · ${pendingImage.width}×${pendingImage.height}` : cloudSyncEnabled ? "拖拽 JPG、PNG、WebP 到此处，或选择图片；上传前将自动压缩为 WebP。" : "公开云端同步启用后，可在此上传共享图片。"}</p>
+                </div>
+                <div className="image-upload-actions">
+                  <button type="button" className="top-action" onClick={() => imageInputRef.current?.click()} disabled={!cloudSyncEnabled || imageUploading || imagePreparing}><ImagePlus size={16} /> 选择或拖拽</button>
+                  <button type="button" className="top-action" onClick={() => { setImageLibraryOpen(true); void refreshImageLibrary(); }} disabled={!cloudSyncEnabled || imagePreparing}><Images size={16} /> 图片库{imageLibrary.length ? ` · ${imageLibrary.length}` : ""}</button>
+                </div>
+                {pendingImage && <div className="image-pending-controls"><input value={imageAlt} onChange={(event) => setImageAlt(event.target.value)} aria-label="图片替代文本" placeholder="图片说明（建议填写）" /><span>{pendingImage.compressed ? `原图 ${formatImageSize(pendingImage.originalBytes)} → ${formatImageSize(pendingImage.outputBytes)}` : "保留原始尺寸"}</span><button type="button" className="top-action top-action-primary" onClick={() => void uploadAndInsertImage()} disabled={imageUploading || imagePreparing}>{imageUploading ? <LoaderCircle className="animate-spin" size={16} /> : <Upload size={16} />} {imageUploading ? "正在上传" : "上传并插入"}</button></div>}
+              </div>
+              <textarea ref={editorRef} rows={23} value={draft.markdown} onChange={(event) => setDraft((value) => ({ ...value, markdown: event.target.value }))} placeholder="可使用工具栏插入标题、表格、代码块、图片、字号与文字颜色；也支持直接编辑 Markdown。" />
+            </div>
             <div className="workspace-form-footer"><label className="workspace-kind"><span>内容类型</span><select value={draft.kind} onChange={(event) => setDraft((value) => ({ ...value, kind: event.target.value as ContentItem["kind"] }))}><option value="chapter">正式章节</option><option value="supplement">导读或补充</option><option value="appendix">附录</option><option value="introduction">前言</option></select></label><div className="flex flex-wrap justify-end gap-2">{editingId && <button type="button" onClick={() => selectedItem && setPendingDelete(selectedItem)} className="delete-button"><Trash2 size={16} /> 删除</button>}<button type="submit" className="top-action top-action-primary"><Check size={16} /> {cloudSyncEnabled ? "保存并发布" : "加密保存"}</button></div></div>
           </form>
         </section>
@@ -399,6 +489,15 @@ export default function AuthorWorkbench() {
         <aside className="workspace-preview" aria-label="实时阅读预览"><div className="workspace-panel-head"><div><p className="eyebrow">LIVE READER PREVIEW</p><h2>发布前预览</h2></div><FileText size={18} /></div><div className="preview-meta"><span>{draft.part || "未归类"}</span><strong>{draft.title || "尚未命名的章节"}</strong></div><div className="workspace-preview-paper"><div className="markdown-body compact" dangerouslySetInnerHTML={{ __html: draftMarkdownHtml }} /></div><p className="workspace-preview-note"><LayoutList size={14} /> 该版式会同步用于公开阅读、复制和 PDF 导出。</p></aside>
       </main>
 
+      {imageLibraryOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-[#20201d]/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="image-library-title">
+        <section className="image-library-dialog max-h-[min(820px,calc(100vh-32px))] w-full max-w-5xl overflow-auto bg-[#f7f3eb] p-6 shadow-2xl sm:p-8">
+          <div className="flex items-start justify-between gap-4 border-b border-[#20201d]/12 pb-5"><div><p className="eyebrow">ARCHIVED IMAGE PLATES</p><h2 id="image-library-title" className="workspace-title mt-2">图片库</h2><p className="mt-2 text-sm leading-6 text-[#20201d]/62">插入已有图片，或删除尚未被已发布正文引用的图片。</p></div><button type="button" onClick={() => setImageLibraryOpen(false)} className="icon-button" aria-label="关闭图片库"><X size={19} /></button></div>
+          <div className="image-library-summary"><span>{imageLibrary.length} 张历史图片</span><button type="button" className="text-link" onClick={() => void refreshImageLibrary()} disabled={imageLibraryLoading}>{imageLibraryLoading ? "正在刷新" : "刷新图片库"}</button></div>
+          {imageLibraryLoading && !imageLibrary.length ? <p className="workspace-empty">正在读取图片库…</p> : <div className="image-library-grid">{imageLibrary.map((image) => { const usedInDraft = draft.markdown.includes(`/v1/images/${image.id}`); return <article className="image-library-card" key={image.id}><img src={image.url} alt="" /><div className="image-library-meta"><strong title={image.fileName}>{image.fileName}</strong><span>{formatImageSize(image.byteSize)} · {new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(image.createdAt))}</span></div><div className="image-library-actions"><button type="button" className="top-action top-action-primary" onClick={() => insertLibraryImage(image)}><ImagePlus size={15} /> 插入</button>{image.usedInPublishedContent || usedInDraft ? <span className="image-in-use">{image.usedInPublishedContent ? "正文引用中" : "草稿引用中"}</span> : <button type="button" className="delete-button" onClick={() => setPendingImageDeletion(image)}><Trash2 size={15} /> 删除</button>}</div></article>; })}</div>}
+          {!imageLibraryLoading && !imageLibrary.length && <p className="workspace-empty">还没有历史图片。拖拽或选择第一张图片开始建立图片库。</p>}
+        </section>
+      </div>}
+      {pendingImageDeletion && <div className="fixed inset-0 z-[60] grid place-items-center bg-[#20201d]/55 p-5 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="image-delete-title"><div className="delete-dialog w-full max-w-md bg-[#f7f3eb] p-7 shadow-2xl"><div className="flex items-start justify-between gap-4"><span className="delete-icon"><Trash2 size={19} /></span><button type="button" onClick={() => setPendingImageDeletion(null)} className="icon-button" aria-label="关闭删除确认"><X size={19} /></button></div><p className="eyebrow mt-6">IMAGE LIBRARY · UNPUBLISHED ASSET</p><h2 id="image-delete-title" className="mt-2 font-serif text-2xl font-bold">删除这张图片？</h2><p className="mt-3 leading-7 text-[#20201d]/66">「{pendingImageDeletion.fileName}」尚未被已发布正文引用。删除后将无法恢复。</p><div className="mt-7 flex justify-end gap-2"><button type="button" onClick={() => setPendingImageDeletion(null)} className="top-action">保留图片</button><button type="button" onClick={() => void confirmImageDelete()} className="delete-button" disabled={imageDeleting}><Trash2 size={16} /> {imageDeleting ? "正在删除" : "确认删除"}</button></div></div></div>}
       {pendingDelete && <div className="fixed inset-0 z-50 grid place-items-center bg-[#20201d]/45 p-5 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="workbench-delete-title"><div className="delete-dialog w-full max-w-md bg-[#f7f3eb] p-7 shadow-2xl"><div className="flex items-start justify-between gap-4"><span className="delete-icon"><Trash2 size={19} /></span><button type="button" onClick={() => setPendingDelete(null)} className="icon-button" aria-label="关闭删除确认"><X size={19} /></button></div><p className="eyebrow mt-6">{cloudSyncEnabled ? "不可撤销的云端发布" : "不可撤销的本地修改"}</p><h2 id="workbench-delete-title" className="mt-2 font-serif text-2xl font-bold">确定移除这一节？</h2><p className="mt-3 leading-7 text-[#20201d]/66">{cloudSyncEnabled ? `「${pendingDelete.title}」会从所有访客读取的已发布手册中删除。` : `「${pendingDelete.title}」会从当前浏览器保存的手册中删除。`}</p><div className="mt-7 flex justify-end gap-2"><button type="button" onClick={() => setPendingDelete(null)} className="top-action">保留内容</button><button type="button" onClick={() => void confirmDelete()} className="delete-button"><Trash2 size={16} /> 确认删除</button></div></div></div>}
     </div>
   );
