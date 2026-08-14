@@ -20,9 +20,11 @@ export const readAuthorToken = () => window.sessionStorage.getItem(AUTHOR_TOKEN_
 export const clearAuthorToken = () => window.sessionStorage.removeItem(AUTHOR_TOKEN_KEY);
 
 async function request<T>(path: string, options: RequestInit = {}) {
+  const headers = new Headers(options.headers);
+  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(`${getContentApiUrl()}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...options.headers },
+    headers,
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new ContentApiError(payload.error ?? "云端内容服务暂时不可用。", response.status);
