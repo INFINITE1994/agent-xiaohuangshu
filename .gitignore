@@ -111,3 +111,10 @@ temp/
 # Manus version file (auto-generated, not part of source)
 client/public/__manus__/version.json
 .project-config.json
+
+# Internal working notes (not product documentation)
+todo.md
+ideas.md
+*_AUDIT.md
+SEO_INDEXING.md
+SQLPUB_INTEGRATION_NOTES.md
